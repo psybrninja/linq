@@ -33,8 +33,10 @@ class LinqServer:
             
             # Start handling client in a new thread
             threading.Thread(target=self.handle_client, daemon=True).start()
+            return True
         except Exception as e:
             print(f"Error starting server: {e}")
+            return False
 
     def handle_client(self):
         """Handle client communication."""
@@ -43,49 +45,10 @@ class LinqServer:
                 data = self.client_socket.recv(4096)
                 if not data:
                     break
-                
-                # Handle different types of data
-                if data.startswith(b"FILE:"):
-                    self.receive_file(data[5:])
-                else:
-                    print("Received unknown data type.")
         except Exception as e:
             print(f"Error handling client: {e}")
         finally:
             self.close_connection()
-
-    def receive_file(self, file_metadata):
-        """Receive a file sent by the client."""
-        try:
-            file_name = file_metadata.decode()
-            print(f"Receiving file: {file_name}")
-            
-            # Create a file to save the data
-            with open(file_name, "wb") as f:
-                while True:
-                    data = self.client_socket.recv(4096)
-                    if not data:
-                        break
-                    f.write(data)
-            
-            print(f"File {file_name} received successfully.")
-        except Exception as e:
-            print(f"Error receiving file: {e}")
-
-    def stream_desktop(self):
-        """Continuously send desktop screenshots to the client."""
-        try:
-            while self.running:
-                # Capture a screenshot
-                screenshot = pyautogui.screenshot()
-                buffer = io.BytesIO()
-                screenshot.save(buffer, format="JPEG")
-                image_data = buffer.getvalue()
-                
-                # Send the screenshot
-                self.client_socket.sendall(image_data)
-        except Exception as e:
-            print(f"Error streaming desktop: {e}")
 
     def close_connection(self):
         """Close the client connection."""
@@ -112,20 +75,14 @@ class LinqClient:
 
     def connect_to_server(self):
         """Connect to the server."""
-        self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.client_socket.connect((self.host, self.port))
-        print(f"Connected to server at {self.host}:{self.port}")
-
-    def send_data(self, data):
-        """Send data to the server."""
-        if self.client_socket:
-            self.client_socket.sendall(data)
-
-    def receive_data(self):
-        """Receive data from the server."""
-        if self.client_socket:
-            return self.client_socket.recv(4096)
-        return None
+        try:
+            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client_socket.connect((self.host, self.port))
+            print(f"Connected to server at {self.host}:{self.port}")
+            return True
+        except Exception as e:
+            print(f"Error connecting to server: {e}")
+            return False
 
     def close(self):
         """Close the client connection."""
@@ -138,7 +95,6 @@ class LinqApp:
         self.root = root
         self.root.title("Linq Desktop Portal")
         self.connection = None
-        self.focal_point = tk.BooleanVar(value=True)
         self.running = False
 
         self.create_widgets()
@@ -149,22 +105,30 @@ class LinqApp:
         conn_frame = tk.Frame(self.root)
         conn_frame.pack(pady=10)
 
-        tk.Label(conn_frame, text="IP Address:").grid(row=0, column=0, padx=5, pady=5)
+        tk.Label(conn_frame, text="Enter remote IP to connect:").grid(row=0, column=0, padx=5, pady=5)
         self.ip_entry = tk.Entry(conn_frame)
         self.ip_entry.grid(row=0, column=1, padx=5, pady=5)
 
         tk.Button(conn_frame, text="Start Server", command=self.start_server).grid(row=1, column=0, padx=5, pady=5)
         tk.Button(conn_frame, text="Connect to Server", command=self.connect_to_server).grid(row=1, column=1, padx=5, pady=5)
 
-        # Security Feature
-        self.focal_toggle = tk.Checkbutton(
-            self.root, text="Enable FocalPoint", variable=self.focal_point, command=self.toggle_focal_point
-        )
-        self.focal_toggle.pack(pady=10)
+        # Host IP Display
+        host_ip_frame = tk.Frame(self.root)
+        host_ip_frame.pack(pady=10)
 
-        # Drag and Drop
-        self.drag_drop_button = tk.Button(self.root, text="Send File", command=self.send_file)
-        self.drag_drop_button.pack(pady=10)
+        tk.Label(host_ip_frame, text="Your IP Address:").grid(row=0, column=0, padx=5, pady=5)
+        self.host_ip_display = tk.Entry(host_ip_frame, state="readonly", width=20)
+        self.host_ip_display.grid(row=0, column=1, padx=5, pady=5)
+        self.host_ip_display.insert(0, self.get_host_ip())
+
+        # Connection Status
+        status_frame = tk.Frame(self.root)
+        status_frame.pack(pady=10)
+
+        tk.Label(status_frame, text="Connection Status:").grid(row=0, column=0, padx=5, pady=5)
+        self.status_display = tk.Entry(status_frame, state="readonly", width=20)
+        self.status_display.grid(row=0, column=1, padx=5, pady=5)
+        self.update_status("Disconnected", "red")
 
         # Collaboration Window
         self.collab_frame = tk.LabelFrame(self.root, text="Live View")
@@ -177,9 +141,10 @@ class LinqApp:
     def start_server(self):
         """Start the server."""
         self.connection = LinqServer()
-        threading.Thread(target=self.connection.start_server, daemon=True).start()
-        threading.Thread(target=self.connection.stream_desktop, daemon=True).start()
-        messagebox.showinfo("Server", "Server started. Waiting for connection...")
+        if self.connection.start_server():
+            self.update_status("Connected", "green")
+        else:
+            self.update_status("Disconnected", "red")
 
     def connect_to_server(self):
         """Connect to the server."""
@@ -189,59 +154,30 @@ class LinqApp:
             return
 
         self.connection = LinqClient(host=ip)
-        threading.Thread(target=self.connection.connect_to_server, daemon=True).start()
-        threading.Thread(target=self.live_view_receive, daemon=True).start()
-        messagebox.showinfo("Client", "Connected to server!")
-
-    def send_file(self):
-        """Send a file to the other party."""
-        if not self.connection:
-            messagebox.showerror("Error", "No connection established.")
-            return
-
-        file_path = filedialog.askopenfilename()
-        if not file_path:
-            return
-
-        try:
-            file_name = os.path.basename(file_path)
-            with open(file_path, "rb") as f:
-                data = f.read()
-
-            self.connection.send_data(f"FILE:{file_name}".encode())
-            self.connection.send_data(data)
-            messagebox.showinfo("File Transfer", f"File '{file_name}' sent successfully.")
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to send file: {e}")
-
-    def live_view_receive(self):
-        """Receive the live view from the other party."""
-        self.running = True
-        while self.running:
-            if not self.connection or not isinstance(self.connection, LinqClient):
-                break
-
-            try:
-                data = self.connection.receive_data()
-                if not data:
-                    break
-                image = Image.open(io.BytesIO(data))
-                photo = ImageTk.PhotoImage(image)
-                self.collab_view.config(image=photo)
-                self.collab_view.image = photo
-            except:
-                break
-
-    def toggle_focal_point(self):
-        """Toggle the FocalPoint security feature."""
-        if self.focal_point.get():
-            print("FocalPoint enabled.")
+        if self.connection.connect_to_server():
+            self.update_status("Connected", "green")
         else:
-            print("FocalPoint disabled.")
+            self.update_status("Disconnected", "red")
+
+    def update_status(self, text, color):
+        """Update the connection status."""
+        self.status_display.config(state="normal")
+        self.status_display.delete(0, tk.END)
+        self.status_display.insert(0, text)
+        self.status_display.config({"foreground": color})
+        self.status_display.config(state="readonly")
+
+    def get_host_ip(self):
+        """Get the host's IP address."""
+        try:
+            hostname = socket.gethostname()
+            return socket.gethostbyname(hostname)
+        except Exception as e:
+            print(f"Error retrieving IP: {e}")
+            return "Unknown"
 
     def exit_app(self):
         """Exit the application."""
-        self.running = False
         if self.connection:
             self.connection.close()
         self.root.destroy()
