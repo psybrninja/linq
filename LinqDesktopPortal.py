@@ -7,7 +7,6 @@ import threading
 import pyautogui
 from PIL import Image, ImageTk
 import io
-import os
 import time
 
 
@@ -30,25 +29,27 @@ class LinqServer:
             self.client_socket, client_address = self.server_socket.accept()
             print(f"Client connected: {client_address}")
             self.running = True
-            
-            # Start handling client in a new thread
-            threading.Thread(target=self.handle_client, daemon=True).start()
             return True
         except Exception as e:
             print(f"Error starting server: {e}")
             return False
 
-    def handle_client(self):
-        """Handle client communication."""
+    def receive_data(self):
+        """Receive data from the client."""
         try:
-            while self.running:
-                data = self.client_socket.recv(4096)
-                if not data:
-                    break
+            if self.client_socket:
+                return self.client_socket.recv(4096)
         except Exception as e:
-            print(f"Error handling client: {e}")
-        finally:
-            self.close_connection()
+            print(f"Error receiving data: {e}")
+        return None
+
+    def send_data(self, data):
+        """Send data to the client."""
+        try:
+            if self.client_socket:
+                self.client_socket.sendall(data)
+        except Exception as e:
+            print(f"Error sending data: {e}")
 
     def close_connection(self):
         """Close the client connection."""
@@ -84,6 +85,23 @@ class LinqClient:
             print(f"Error connecting to server: {e}")
             return False
 
+    def receive_data(self):
+        """Receive data from the server."""
+        try:
+            if self.client_socket:
+                return self.client_socket.recv(4096)
+        except Exception as e:
+            print(f"Error receiving data: {e}")
+        return None
+
+    def send_data(self, data):
+        """Send data to the server."""
+        try:
+            if self.client_socket:
+                self.client_socket.sendall(data)
+        except Exception as e:
+            print(f"Error sending data: {e}")
+
     def close(self):
         """Close the client connection."""
         if self.client_socket:
@@ -96,8 +114,14 @@ class LinqApp:
         self.root.title("Linq Desktop Portal")
         self.connection = None
         self.running = False
+        self.is_remote_connected = False
+        self.local_view_thread = None
 
         self.create_widgets()
+
+        # Start local desktop streaming
+        self.local_view_thread = threading.Thread(target=self.update_local_view, daemon=True)
+        self.local_view_thread.start()
 
     def create_widgets(self):
         """Create the GUI widgets."""
@@ -133,7 +157,7 @@ class LinqApp:
         # Collaboration Window
         self.collab_frame = tk.LabelFrame(self.root, text="Live View")
         self.collab_frame.pack(pady=10)
-        self.collab_view = tk.Label(self.collab_frame, width=60, height=20, bg="black")
+        self.collab_view = tk.Label(self.collab_frame, width=1000, height=600, bg="black")
         self.collab_view.pack()
 
         tk.Button(self.root, text="Exit", command=self.exit_app).pack(pady=10)
@@ -143,6 +167,8 @@ class LinqApp:
         self.connection = LinqServer()
         if self.connection.start_server():
             self.update_status("Connected", "green")
+            self.is_remote_connected = True
+            threading.Thread(target=self.receive_remote_view, daemon=True).start()
         else:
             self.update_status("Disconnected", "red")
 
@@ -156,6 +182,8 @@ class LinqApp:
         self.connection = LinqClient(host=ip)
         if self.connection.connect_to_server():
             self.update_status("Connected", "green")
+            self.is_remote_connected = True
+            threading.Thread(target=self.receive_remote_view, daemon=True).start()
         else:
             self.update_status("Disconnected", "red")
 
@@ -176,8 +204,43 @@ class LinqApp:
             print(f"Error retrieving IP: {e}")
             return "Unknown"
 
+    def update_local_view(self):
+        """Update the live view with the local desktop when not connected."""
+        while not self.is_remote_connected:
+            try:
+                screenshot = pyautogui.screenshot()
+                buffer = io.BytesIO()
+                screenshot.thumbnail((1000, 600))
+                screenshot.save(buffer, format="JPEG")
+                image = Image.open(buffer)
+                photo = ImageTk.PhotoImage(image)
+
+                self.collab_view.config(image=photo)
+                self.collab_view.image = photo
+
+                time.sleep(0.1)
+            except Exception as e:
+                print(f"Error updating local view: {e}")
+                break
+
+    def receive_remote_view(self):
+        """Receive and display the remote desktop view."""
+        while self.is_remote_connected:
+            try:
+                data = self.connection.receive_data()
+                if not data:
+                    break
+                image = Image.open(io.BytesIO(data))
+                photo = ImageTk.PhotoImage(image)
+                self.collab_view.config(image=photo)
+                self.collab_view.image = photo
+            except Exception as e:
+                print(f"Error displaying remote view: {e}")
+                break
+
     def exit_app(self):
         """Exit the application."""
+        self.is_remote_connected = False
         if self.connection:
             self.connection.close()
         self.root.destroy()
