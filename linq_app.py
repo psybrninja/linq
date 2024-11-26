@@ -7,6 +7,7 @@ from PIL import Image, ImageTk
 import io
 import threading
 import time
+import logging
 import socket
 
 
@@ -66,12 +67,16 @@ class LinqApp:
     def start_server(self):
         """Start the server."""
         self.connection = LinqServer()
+        threading.Thread(target=self.run_server, daemon=True).start()
+
+    def run_server(self):
+        """Run the server logic in a separate thread."""
         if self.connection.start_server():
-            self.update_status("Connected", "green")
+            self.root.after(0, self.update_status, "Connected", "green")
             self.is_remote_connected = True
             threading.Thread(target=self.receive_remote_view, daemon=True).start()
         else:
-            self.update_status("Disconnected", "red")
+            self.root.after(0, self.update_status, "Disconnected", "red")
 
     def connect_to_server(self):
         """Connect to the server."""
@@ -102,7 +107,7 @@ class LinqApp:
             hostname = socket.gethostname()
             return socket.gethostbyname(hostname)
         except Exception as e:
-            print(f"Error retrieving IP: {e}")
+            logging.error(f"Error retrieving IP: {e}")
             return "Unknown"
 
     def update_local_view(self):
@@ -119,9 +124,9 @@ class LinqApp:
                 self.collab_view.config(image=photo)
                 self.collab_view.image = photo
 
-                time.sleep(0.1)
+                time.sleep(0.5)
             except Exception as e:
-                print(f"Error updating local view: {e}")
+                logging.error(f"Error updating local view: {e}")
                 break
 
     def receive_remote_view(self):
@@ -136,7 +141,7 @@ class LinqApp:
                 self.collab_view.config(image=photo)
                 self.collab_view.image = photo
             except Exception as e:
-                print(f"Error displaying remote view: {e}")
+                logging.error(f"Error displaying remote view: {e}")
                 break
 
     def exit_app(self):

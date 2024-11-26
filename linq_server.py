@@ -1,5 +1,5 @@
 import socket
-import threading
+import logging
 
 
 class LinqServer:
@@ -16,14 +16,17 @@ class LinqServer:
             self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.server_socket.bind((self.host, self.port))
             self.server_socket.listen(1)
-            print(f"Server started on {self.host}:{self.port}. Waiting for a client...")
+            logging.info(f"Server started on {self.host}:{self.port}. Waiting for a client...")
             
             self.client_socket, client_address = self.server_socket.accept()
-            print(f"Client connected: {client_address}")
+            logging.info(f"Client connected: {client_address}")
             self.running = True
             return True
+        except OSError as e:
+            logging.error(f"Port {self.port} may already be in use: {e}")
+            return False
         except Exception as e:
-            print(f"Error starting server: {e}")
+            logging.error(f"Error starting server: {e}")
             return False
 
     def receive_data(self):
@@ -32,7 +35,7 @@ class LinqServer:
             if self.client_socket:
                 return self.client_socket.recv(4096)
         except Exception as e:
-            print(f"Error receiving data: {e}")
+            logging.error(f"Error receiving data: {e}")
         return None
 
     def send_data(self, data):
@@ -41,7 +44,7 @@ class LinqServer:
             if self.client_socket:
                 self.client_socket.sendall(data)
         except Exception as e:
-            print(f"Error sending data: {e}")
+            logging.error(f"Error sending data: {e}")
 
     def close_connection(self):
         """Close the client connection."""
@@ -49,7 +52,7 @@ class LinqServer:
         if self.client_socket:
             self.client_socket.close()
             self.client_socket = None
-        print("Client disconnected.")
+        logging.info("Client disconnected.")
 
     def stop_server(self):
         """Stop the server."""
@@ -57,4 +60,4 @@ class LinqServer:
         if self.server_socket:
             self.server_socket.close()
             self.server_socket = None
-        print("Server stopped.")
+        logging.info("Server stopped.")
